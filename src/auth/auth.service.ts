@@ -61,15 +61,16 @@ export class AuthService {
 
             const isMatch = await bcrypt.compare(password, user.password)
 
-            if(!isMatch){
+            if (!isMatch) {
                 throw new ForbiddenException("Invalid Credentials!")
             }
 
-            const token = await this.signtoken(user.id, user.email)
+            const tokens = await this.signtoken(user.id, user.email)
+            await this.updateRefreshToken(user.id, tokens.refresh_token)
 
             return {
                 message: "User Signed In!",
-                token
+                tokens
             }
 
 
@@ -82,7 +83,7 @@ export class AuthService {
     async signtoken(
         userId: number,
         email: string
-    ): Promise<{ access_token: string }> {
+    ): Promise<{ access_token: string, refresh_token: string }> {
         const payload = {
             sub: userId,
             email
@@ -97,17 +98,32 @@ export class AuthService {
                 secret: secret
             }
         )
+
+        const refreshToken = await this.jwt.signAsync(
+            payload,
+            {
+                expiresIn: '7d',
+                secret: secret
+            }
+        )
+
         return {
-            access_token: token
+            access_token: token,
+            refresh_token: refreshToken
         }
     }
 
-    async sendOtp(dto: sendOtpDto){
-        try {
-            const {email} = dto
-            const user = await this.UsersRepo.findOneBy({email})
+    async updateRefreshToken(userId: number, refreshToken: string) {
+        const hashedToken = await bcrypt.hash(refreshToken, 10)
+        await this.UsersRepo.update(userId, { hashedRefreshToken: hashedToken })
+    }
 
-            if(!user){
+    async sendOtp(dto: sendOtpDto) {
+        try {
+            const { email } = dto
+            const user = await this.UsersRepo.findOneBy({ email })
+
+            if (!user) {
                 throw new NotFoundException("Invalid Credentials!")
             }
 
@@ -131,18 +147,23 @@ export class AuthService {
         }
     }
 
-    async resetPassword(dto: ResetPasswordDto){
+    async resetPassword(dto: ResetPasswordDto) {
         try {
-            const {otp, newPassword} = dto
+            const { otp, newPassword } = dto
 
             const user = await this.UsersRepo.findOne({
-                where: {otp}
+                where: { otp }
             })
 
-            if(!user || !user.otpExpires || new Date() > user.otpExpires){
+            if (!user || !user.otpExpires || new Date() > user.otpExpires) {
                 throw new BadRequestException('Invalid Or Expired OTP')
             }
 
+            if (user.password === newPassword) {
+                return {
+                    error: "Do not Repeat Your Old Password!"
+                }
+            }
             user.password = await bcrypt.hash(newPassword, 10)
             user.otp = null
             user.otpExpires = null
@@ -151,7 +172,7 @@ export class AuthService {
             return {
                 message: "Password Reset Successful!"
             }
-        } catch (error) {   
+        } catch (error) {
             console.log('Reset Password Error: ', error)
             throw new BadRequestException("Reset Password Failed!")
         }

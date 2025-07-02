@@ -19,4 +19,7 @@ export class User{
 
     @Column({nullable: true, type: 'timestamp'})
     otpExpires: Date | null
+
+    @Column({nullable: true, type: 'text'})
+    hashedRefreshToken: string | null
 }
